@@ -1,0 +1,87 @@
+#pragma once
+
+#include "cuda_filters.cuh"
+#include "free_image_wrapper.cuh"
+#include <chrono>
+#include <iomanip>
+#include <iostream>
+#include <string>
+
+using namespace std::string_literals;
+
+static bool first_call_benchmark_message = true;
+
+/**
+ * Benchmarks a filtre bundle. It must take as an argument auto& counter
+ * @tparam func type of the lambda to benhcmark
+ * @param name name of the benchmark (just for the output)
+ * @param filter_kernel_bundle Bundle to benchmark: It must take as an argument auto& counter
+ * @param rounds number of iterations
+ */
+template<typename func> void static inline benchmark_filter_bundle(const std::string& name, func&& filter_kernel_bundle, int rounds = 1000) {
+    if (first_call_benchmark_message) {
+        std::cerr << "\n * * * * * * *  BENCHMARK NOTICE  * * * * * * * \n"
+                  << " * FPS is the number of filter bundles processed per second.\n"
+                  << " * Gpx/s is the minimum theorical number of pixels read and written by the filter per second from main memory (confirmed in assembly).\n"
+                  << " * 'app. reqd. bandwidth' is the memory bandwidth required to fulfill the theorical throughput.\n"
+                  << " * mem efficiency is the ratio between app reqd bandwidth and GPUs real bandwidth (ideally >> 1, see thermodynamic analogy).\n"
+                  << " *      efficiency < 1 : high arithmetic intensity and/or bad memory access pattern and/or no data reuse\n"
+                  << " *      efficiency = 1 : operating at memcpy speeds, mem bus saturared. eventually room left for data reuse \n"
+                  << " *      efficiency > 1 : data reuse must occur between different pixels (which is nice: good strides/access pattern, probably convolution based filter here) \n"
+                  << " * * * * * * * END BENCHMARK NOTICE * * * * * * * \n"
+                  << std::endl;
+    }
+
+    first_call_benchmark_message = false;
+
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    auto peak_bw = 2.0 * prop.memoryClockRate * (prop.memoryBusWidth / 8) * 1e-6;
+
+    CUDA_CHECK(cudaDeviceSynchronize())
+    auto begin = std::chrono::steady_clock::now();
+    size_t processed_pixels = 0;
+    for (int i = 0; i < rounds; ++i) { filter_kernel_bundle(processed_pixels); }
+    CUDA_CHECK(cudaDeviceSynchronize())
+    auto end = std::chrono::steady_clock::now();
+    CHECK_LAST_ERROR_ASYNC
+    if (processed_pixels == 0) { std::cerr << "Benchmarker got zero processed pixels. Did you forget to registers the processed pixels ?" << std::endl; }
+    size_t nano = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count();
+    double throughput = static_cast<double>(processed_pixels) / nano;
+    std::cout << "[" << name << "]  FPS : " << std::setprecision(4) << std::setw(6) << rounds / (nano * 1e-9) <<   //
+            ", Throughput: " << std::setprecision(4) << std::setw(6) << throughput << " Gpx/s." <<                 //
+            "  (app. reqd. bandwidth: " << std::setprecision(3) << std::setw(5) << throughput * sizeof(pixel) << " GB/s, efficiency: " << throughput * sizeof(pixel) / peak_bw << ")" << std::endl;
+}
+
+
+/**
+ * Runs a filter bundle over an image
+ * @tparam func type of the kernel bundle
+ * @param in path of the image to read
+ * @param out path of the image to output
+ * @param filter_bundle Lambda of kernels. The arguments must be: auto& image
+ */
+template<typename func> static inline void apply_filter_bundle(const std::string& in, const std::string& out, func&& filter_bundle) {
+    auto image = load_cuda_image(in);
+    CHECK_LAST_ERROR_ASYNC
+    filter_bundle(image);
+    CHECK_LAST_ERROR_ASYNC
+    store_cuda_image(image, out);
+    CHECK_LAST_ERROR_ASYNC
+}
+
+/**
+ * Runs a filter bundle over image quadrants using separate streams
+ * @tparam func type of the kernel bundle
+ * @param in path of the image to read
+ * @param out path of the image to output
+ * @param filter_bundle Lambda of kernels. The arguments must be: (auto& top_left, auto& top_right, auto& bottom_left, auto& bottom_right)
+ */
+template<typename func> static inline void apply_filter_bundle_per_quadrant(const std::string& in, const std::string& out, func&& filter_bundle) {
+    auto images = load_cuda_image_into_quadrants(in);
+    CHECK_LAST_ERROR_ASYNC
+    filter_bundle(images[1], images[0], images[3], images[2]);
+    CHECK_LAST_ERROR_ASYNC
+    store_cuda_image_quadrants(images, out);
+    CHECK_LAST_ERROR_ASYNC
+}
