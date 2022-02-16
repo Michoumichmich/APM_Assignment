@@ -28,7 +28,6 @@ size_t mirror_vertical(cuda_image& image) {
         image.at(x, y) = image.at(image.width() - x, y);
         image.at(image.width() - x, y) = tmp;
     });
-
     return 2 * image.width() * image.height();
 }
 
@@ -38,7 +37,6 @@ size_t mirror_horitonzal(cuda_image& image) {
         image.at(x, y) = image.at(x, image.height() - y);
         image.at(x, image.height() - y) = tmp;
     });
-
     return 2 * image.width() * image.height();
 }
 
@@ -260,6 +258,5 @@ size_t popart_filter(cuda_image& image) {
             case 3: image.at(x, y) = pixel(convert_pixel_bw<true>(image.at(x, y))); break;
         }
     });
-
     return 2 * image.width() * image.height();
 }

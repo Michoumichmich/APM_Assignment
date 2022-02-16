@@ -3,6 +3,10 @@
 static void run_bench_suite(const std::string& in) {
     auto image = load_cuda_image(in);
     auto split_images = load_cuda_image_into_quadrants(in);
+    //size_t size = 2048;
+    //auto image = cuda_image(2 * size, 2 * size);
+    //auto split_images = std::array{cuda_image(size, size, true), cuda_image(size, size, true), cuda_image(size, size, true), cuda_image(size, size, true)};
+
 
     // clang-format off
     benchmark_filter_bundle("BW avoid FP"s, [&](auto &counter) { counter += bw_filter(image, true); });
